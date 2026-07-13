@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Gym Timer & Music (v4 - Spotify Real)</title>
+    <title>Gym Timer & Music (v4.1 - Spotify iFrame + Login)</title>
     <!-- Tailwind CSS via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- Spotify iFrame API (control real de reproducción con tu cuenta) -->
     <script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
     <style>
         html, body {
-            height: 100dvh; /* Altura real del viewport en móviles (evita que la barra del navegador tape contenido) */
+            height: 100dvh;
             overflow: hidden;
         }
         body {
@@ -25,7 +25,7 @@
             transition: max-height 0.35s ease, opacity 0.35s ease, margin 0.35s ease;
         }
         #spotify-embed-panel.abierto {
-            max-height: 200px;
+            max-height: 320px;
             opacity: 1;
         }
         .control-disabled {
@@ -73,9 +73,19 @@
 
     <!-- PANEL DE CONEXIÓN CON SPOTIFY (se abre/cierra al tocar el estado superior) -->
     <div id="spotify-embed-panel" class="w-full px-6">
-        <p class="text-[11px] text-zinc-500 text-center mb-1 leading-snug">
-            Inicia sesión aquí una vez con tu cuenta (requiere Spotify Premium para reproducir canciones completas). Después podrás usar los botones de abajo.
-        </p>
+        <!-- PASO 1: iniciar sesión con tus credenciales de Spotify -->
+        <div id="login-row" class="flex flex-col gap-2 mb-2">
+            <button id="btn-spotify-login" class="w-full bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold py-3 rounded-xl active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.565.387-.86.207-2.377-1.454-5.37-1.783-8.894-.982-.336.075-.668-.135-.744-.47-.075-.336.135-.668.47-.743 3.856-.88 7.15-.51 9.822 1.13.296.178.387.563.206.858z"/></svg>
+                1. INICIAR SESIÓN EN SPOTIFY
+            </button>
+            <button id="btn-ya-inicie" class="w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white text-sm font-semibold py-2.5 rounded-xl active:scale-98 transition-all cursor-pointer">
+                2. Ya inicié sesión → recargar reproductor
+            </button>
+            <p class="text-[11px] text-zinc-500 text-center leading-snug">
+                Se abrirá Spotify en otra pestaña para que ingreses tu correo y contraseña. Cuando termines, vuelve aquí y toca el botón 2. (Se requiere Spotify Premium para canciones completas.)
+            </p>
+        </div>
         <div id="embed-iframe" class="rounded-2xl overflow-hidden"></div>
     </div>
 
@@ -121,6 +131,9 @@
         const PLAYLIST_ID = '0OjsxoKKHTbu3GDPCURr9g';
         const PLAYLIST_URI = `spotify:playlist:${PLAYLIST_ID}`;
         const PLAYLIST_URL = `https://open.spotify.com/playlist/${PLAYLIST_ID}`;
+        // Página de login de Spotify: al terminar te deja en open.spotify.com
+        // con la sesión activa, que es la misma que usa el reproductor de aquí.
+        const SPOTIFY_LOGIN_URL = `https://accounts.spotify.com/es/login?continue=${encodeURIComponent(PLAYLIST_URL)}`;
 
         /* =====================================================
            ELEMENTOS DOM
@@ -141,6 +154,9 @@
         const spotifyStatusDot = document.getElementById('spotify-status-dot');
         const spotifyStatusText = document.getElementById('spotify-status-text');
         const spotifyPanel = document.getElementById('spotify-embed-panel');
+        const btnSpotifyLogin = document.getElementById('btn-spotify-login');
+        const btnYaInicie = document.getElementById('btn-ya-inicie');
+        const loginRow = document.getElementById('login-row');
 
         let countdownInterval = null;
         let timeLeft = 180;
@@ -164,10 +180,7 @@
             }
         }
 
-        // FALLBACK adicional: video invisible en loop (funciona incluso en
-        // navegadores/versiones que no soportan la Wake Lock API, ej. iOS
-        // Safari antiguo). Se combina con la Wake Lock API para máxima
-        // fiabilidad "bajo ninguna circunstancia".
+        // FALLBACK adicional: video invisible en loop
         function iniciarVideoNoSleep() {
             try {
                 if (window.__noSleepVideo) {
@@ -205,20 +218,13 @@
             iniciarVideoNoSleep();
         }
 
-        // Activar apenas carga la página
         reforzarPantallaEncendida();
-
-        // Reforzar cada 15s por si el sistema lo liberó solo
         setInterval(reforzarPantallaEncendida, 15000);
-
-        // Si sales de la app (cambias de app / bloqueas) y regresas, se reactiva solo
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 reforzarPantallaEncendida();
             }
         });
-
-        // Cualquier interacción también refuerza el anti-bloqueo
         document.addEventListener('click', reforzarPantallaEncendida);
 
         /* =====================================================
@@ -284,9 +290,6 @@
             statusText.classList.add('text-[#1DB954]');
             actualizarPantalla();
 
-            // Solo reanudamos si estaba en pausa: si ya estaba sonando,
-            // NO volvemos a llamar resume() (eso era lo que reiniciaba
-            // la canción). Así sigue exactamente donde iba.
             if (isPaused) {
                 reanudarSpotify();
             }
@@ -310,18 +313,19 @@
         btn3m.addEventListener('click', () => iniciarTemporizador(180, 'Descanso Largo'));
 
         /* =====================================================
-           SPOTIFY — CONTROL REAL vía iFrame API
-           Controla la reproducción que corre con TU cuenta
-           (inicia sesión una vez dentro del panel de arriba).
-           Nota: la API pública de Spotify no expone "siguiente/
-           anterior" de forma oficial; por eso esos dos botones
-           avanzan/retroceden 15s dentro de la canción actual.
-           El play/pause sí es control 100% real.
+           SPOTIFY — iFrame API + LOGIN
+           El iframe de Spotify usa la sesión de spotify.com de
+           este navegador. Como el iframe no muestra formulario
+           de credenciales, el botón "INICIAR SESIÓN" abre
+           Spotify en otra pestaña para que ingreses tu correo y
+           contraseña; al volver, el botón 2 recarga el
+           reproductor y toma tu sesión.
         ===================================================== */
         let spotifyController = null;
         let spotifyReady = false;
         let isPaused = true;
         let posicionActualMs = 0;
+        let iframeAPIGlobal = null;
 
         function setEstadoSpotify(dotClass, texto) {
             spotifyStatusDot.className = `w-2 h-2 rounded-full ${dotClass}`;
@@ -344,8 +348,33 @@
             spotifyPanel.classList.add('abierto');
         });
 
-        window.onSpotifyIframeApiReady = (IFrameAPI) => {
-            const element = document.getElementById('embed-iframe');
+        // BOTÓN 1: abre Spotify en otra pestaña para ingresar credenciales
+        btnSpotifyLogin.addEventListener('click', () => {
+            window.open(SPOTIFY_LOGIN_URL, '_blank');
+            setEstadoSpotify('bg-yellow-500 animate-pulse', 'INICIA SESIÓN EN LA OTRA PESTAÑA Y VUELVE');
+        });
+
+        // BOTÓN 2: recrea el iframe para que tome la sesión recién iniciada
+        btnYaInicie.addEventListener('click', () => {
+            recrearReproductor();
+        });
+
+        function recrearReproductor() {
+            const contenedor = document.getElementById('embed-iframe');
+            // Vaciar y volver a crear el controller con la sesión nueva
+            contenedor.innerHTML = '';
+            const nuevo = document.createElement('div');
+            contenedor.appendChild(nuevo);
+            if (iframeAPIGlobal) {
+                crearController(iframeAPIGlobal, nuevo);
+                setEstadoSpotify('bg-yellow-500 animate-pulse', 'RECARGANDO REPRODUCTOR...');
+            } else {
+                // Si la API aún no cargó, recargamos toda la página
+                location.reload();
+            }
+        }
+
+        function crearController(IFrameAPI, element) {
             const options = {
                 uri: PLAYLIST_URI,
                 width: '100%',
@@ -356,13 +385,14 @@
 
                 controller.addListener('ready', () => {
                     spotifyReady = true;
-                    setEstadoSpotify('bg-yellow-500 animate-pulse', 'TOCA ARRIBA E INICIA SESIÓN EN SPOTIFY');
+                    setEstadoSpotify('bg-yellow-500 animate-pulse', 'DALE PLAY ABAJO PARA COMPROBAR TU SESIÓN');
                 });
 
                 controller.addListener('playback_started', (e) => {
                     setEstadoSpotify('bg-green-500 animate-pulse', 'SPOTIFY CONECTADO');
                     habilitarControles(true);
-                    // Colapsa el panel automáticamente una vez que ya está sonando
+                    // Oculta los botones de login y colapsa el panel: ya funciona
+                    loginRow.classList.add('hidden');
                     spotifyPanel.classList.remove('abierto');
                     actualizarMetadataCancion(e.data.playingURI);
                 });
@@ -381,6 +411,14 @@
                     }
                 });
             });
+        }
+
+        window.onSpotifyIframeApiReady = (IFrameAPI) => {
+            iframeAPIGlobal = IFrameAPI;
+            const element = document.getElementById('embed-iframe');
+            const inner = document.createElement('div');
+            element.appendChild(inner);
+            crearController(IFrameAPI, inner);
         };
 
         // Si el script de Spotify tarda o falla en cargar, avisamos
