@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Gym Timer & Spotify Remote (v5.0)</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        html, body {
+            height: 100dvh;
+            overflow: hidden;
+        }
+        body {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            background-color: #121212;
+        }
+        #spotify-panel {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.35s ease, opacity 0.35s ease, margin 0.35s ease;
+        }
+        #spotify-panel.abierto {
+            max-height: 480px;
+            opacity: 1;
+            overflow-y: auto;
+        }
+        .control-disabled {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+        input[type="text"]:focus {
+            outline: 2px solid #1DB954;
+        }
+    </style>
+</head>
+<body class="text-white flex flex-col justify-between font-sans">
+
+    <!-- ESTADO SUPERIOR (toca para mostrar/ocultar el panel de conexión con Spotify) -->
+    <div class="w-full pt-4 px-6 landscape:pt-1.5 landscape:pb-0 flex justify-between items-center text-xs tracking-wider text-gray-400 shrink-0">
+        <button id="spotify-status" class="flex items-center gap-2 cursor-pointer">
+            <span id="spotify-status-dot" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+            <span id="spotify-status-text">CONTROL REMOTO DESCONECTADO</span>
+        </button>
+        <span id="app-version" class="text-[10px] text-zinc-600 font-mono">v5.0</span>
+    </div>
+
+    <!-- SECCIÓN CENTRAL: vertical = columna | horizontal = timer izquierda, botones derecha -->
+    <div class="flex-1 min-h-0 flex flex-col landscape:flex-row items-center justify-center gap-6 landscape:gap-8 px-6">
+        <div class="text-center landscape:flex-1">
+            <div id="timer-display" class="text-7xl md:text-8xl landscape:text-6xl landscape:md:text-8xl font-bold tracking-tighter text-white transition-all duration-300">
+                03:00
+            </div>
+            <div id="status-text" class="text-sm uppercase tracking-widest text-gray-400 font-semibold mt-2 landscape:mt-1">
+                Listo para entrenar
+            </div>
+        </div>
+
+        <div class="w-full max-w-sm flex flex-col gap-3 landscape:gap-2 landscape:flex-1 landscape:max-w-xs">
+            <button id="btn-30s" class="w-full bg-zinc-800 hover:bg-zinc-700 active:scale-98 transition-all py-4 landscape:py-2.5 px-6 rounded-2xl flex flex-col items-center justify-center border border-zinc-700 shadow-lg cursor-pointer">
+                <span class="text-lg landscape:text-base font-bold tracking-wide">30 SEGUNDOS</span>
+                <span class="text-xs text-zinc-400 mt-0.5">Entre Series</span>
+            </button>
+
+            <button id="btn-3m" class="w-full bg-[#1DB954] hover:bg-[#1ed760] text-black active:scale-98 transition-all py-5 landscape:py-3 px-6 rounded-2xl flex flex-col items-center justify-center font-bold shadow-[0_0_20px_rgba(29,185,84,0.3)] cursor-pointer">
+                <span class="text-xl landscape:text-lg tracking-wide">3 MINUTOS</span>
+                <span class="text-xs text-black/70 font-semibold mt-0.5">Descanso Largo + Reanuda Spotify en tu celular 🎵</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- PANEL DE CONEXIÓN CON SPOTIFY (Control Remoto vía Web API) -->
+    <div id="spotify-panel" class="w-full px-6">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-2 flex flex-col gap-3">
+            <p class="text-xs text-zinc-400 leading-snug">
+                Esta app <span class="text-white font-semibold">no reproduce música aquí</span>: solo envía comandos de
+                play/pausa/siguiente a la app oficial de Spotify abierta en tu celular, usando la Web API de Spotify.
+                Abre Spotify en tu teléfono y dale play a algo antes de conectar.
+            </p>
+
+            <div id="config-row" class="flex flex-col gap-2">
+                <label class="text-[11px] text-zinc-500">Client ID de tu app en el Spotify Developer Dashboard</label>
+                <input id="input-client-id" type="text" placeholder="Pega aquí tu Client ID"
+                    class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-600">
+
+                <label class="text-[11px] text-zinc-500 mt-1">Redirect URI (cópiala en tu app de Spotify → Settings → Redirect URIs)</label>
+                <div class="flex gap-2">
+                    <input id="input-redirect-uri" type="text" readonly
+                        class="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-300">
+                    <button id="btn-copy-redirect" class="bg-zinc-700 hover:bg-zinc-600 px-3 rounded-xl text-xs font-semibold cursor-pointer">
+                        Copiar
+                    </button>
+                </div>
+
+                <button id="btn-guardar-client-id" class="w-full bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-semibold py-2.5 rounded-xl active:scale-98 transition-all cursor-pointer mt-1">
+                    Guardar Client ID
+                </button>
+
+                <button id="btn-conectar-spotify" class="w-full bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold py-3 rounded-xl active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2 mt-1">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.565.387-.86.207-2.377-1.454-5.37-1.783-8.894-.982-.336.075-.668-.135-.744-.47-.075-.336.135-.668.47-.743 3.856-.88 7.15-.51 9.822 1.13.296.178.387.563.206.858z"/></svg>
+                    Conectar con Spotify
+                </button>
+
+                <button id="btn-desconectar" class="w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs font-semibold py-2 rounded-xl active:scale-98 transition-all cursor-pointer hidden">
+                    Cerrar sesión de Spotify
+                </button>
+            </div>
+
+            <p id="config-help" class="text-[11px] text-zinc-500 leading-snug">
+                ¿No tienes Client ID? Crea una app gratis en
+                <span class="text-zinc-400">developer.spotify.com/dashboard</span>, agrega la Redirect URI de arriba
+                exactamente igual, y pega el Client ID aquí. Se requiere Spotify Premium para controlar la
+                reproducción desde otra app.
+            </p>
+        </div>
+    </div>
+
+    <!-- REPRODUCTOR INFERIOR: ESTADO DEL CELULAR (control remoto, no reproduce audio local) -->
+    <div class="w-full bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 px-6 py-4 landscape:py-2 flex flex-col gap-2 landscape:gap-1 shrink-0">
+        <div class="flex justify-between items-center">
+            <div class="flex flex-col min-w-[120px]">
+                <span id="track-title" class="text-sm font-medium truncate">Conecta tu Spotify arriba</span>
+                <span id="track-artist" class="text-xs text-zinc-400 truncate">Sin dispositivo activo</span>
+            </div>
+
+            <div class="flex items-center gap-6 landscape:gap-4">
+                <button id="btn-prev" title="Canción anterior" class="control-disabled text-zinc-400 hover:text-white active:scale-90 transition-transform cursor-pointer">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6L18 6v12z"/></svg>
+                </button>
+                <button id="btn-play-pause" title="Reproducir/Pausar en tu celular" class="control-disabled w-10 h-10 landscape:w-9 landscape:h-9 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-md cursor-pointer">
+                    <svg id="play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <svg id="pause-icon" class="w-5 h-5 fill-current hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                </button>
+                <button id="btn-next" title="Siguiente canción" class="control-disabled text-zinc-400 hover:text-white active:scale-90 transition-transform cursor-pointer">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18V6l8.5 6zm10-12h2v12h-2z"/></svg>
+                </button>
+            </div>
+
+            <div id="device-badge" class="hidden sm:flex items-center gap-1 text-zinc-500 text-[11px] max-w-[110px] truncate">
+                <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V4h10v15z"/></svg>
+                <span id="device-name" class="truncate">Sin dispositivo</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- LÓGICA DE JAVASCRIPT -->
+    <script>
+        /* =====================================================
+           CONFIG / VERSIÓN
+        ===================================================== */
+        const APP_VERSION = 'v5.0';
+        document.getElementById('app-version').textContent = APP_VERSION;
+
+        const SCOPES = [
+            'user-read-playback-state',
+            'user-modify-playback-state',
+            'user-read-currently-playing'
+        ].join(' ');
+
+        // La Redirect URI debe coincidir EXACTO con la registrada en el Dashboard de Spotify.
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+
+        /* =====================================================
+           ELEMENTOS DOM
+        ===================================================== */
+        const timerDisplay = document.getElementById('timer-display');
+        const statusText = document.getElementById('status-text');
+        const btn30s = document.getElementById('btn-30s');
+        const btn3m = document.getElementById('btn-3m');
+        const trackTitle = document.getElementById('track-title');
+        const trackArtist = document.getElementById('track-artist');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const btnPlayPause = document.getElementById('btn-play-pause');
+        const btnNext = document.getElementById('btn-next');
+        const btnPrev = document.getElementById('btn-prev');
+        const deviceBadge = document.getElementById('device-badge');
+        const deviceName = document.getElementById('device-name');
+        const spotifyStatusBtn = document.getElementById('spotify-status');
+        const spotifyStatusDot = document.getElementById('spotify-status-dot');
+        const spotifyStatusText = document.getElementById('spotify-status-text');
+        const spotifyPanel = document.getElementById('spotify-panel');
+        const inputClientId = document.getElementById('input-client-id');
+        const inputRedirectUri = document.getElementById('input-redirect-uri');
+        const btnCopyRedirect = document.getElementById('btn-copy-redirect');
+        const btnGuardarClientId = document.getElementById('btn-guardar-client-id');
+        const btnConectarSpotify = document.getElementById('btn-conectar-spotify');
+        const btnDesconectar = document.getElementById('btn-desconectar');
+        const configHelp = document.getElementById('config-help');
+
+        inputRedirectUri.value = REDIRECT_URI;
+
+        let countdownInterval = null;
+        let timeLeft = 180;
+        let wakeLock = null;
+
+        /* =====================================================
+           WAKE LOCK — pantalla SIEMPRE encendida mientras la
+           página esté abierta en primer plano (no depende del timer)
+        ===================================================== */
+        async function solicitarWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try {
+                if (wakeLock !== null) return;
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+            } catch (err) {
+                console.log(`Error Wake Lock: ${err.message}`);
+            }
+        }
+
+        function iniciarVideoNoSleep() {
+            try {
+                if (window.__noSleepVideo) {
+                    window.__noSleepVideo.play().catch(() => {});
+                    return;
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = 1;
+                canvas.height = 1;
+                const ctx = canvas.getContext('2d');
+                ctx.fillRect(0, 0, 1, 1);
+                const stream = canvas.captureStream(1);
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.muted = true;
+                video.setAttribute('muted', '');
+                video.playsInline = true;
+                video.setAttribute('playsinline', '');
+                video.loop = true;
+                video.style.position = 'fixed';
+                video.style.width = '1px';
+                video.style.height = '1px';
+                video.style.opacity = '0';
+                video.style.pointerEvents = 'none';
+                document.body.appendChild(video);
+                video.play().catch(() => {});
+                window.__noSleepVideo = video;
+            } catch (e) {
+                console.log('No se pudo iniciar el fallback anti-bloqueo:', e.message);
+            }
+        }
+
+        function reforzarPantallaEncendida() {
+            solicitarWakeLock();
+            iniciarVideoNoSleep();
+        }
+
+        reforzarPantallaEncendida();
+        setInterval(reforzarPantallaEncendida, 15000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reforzarPantallaEncendida();
+        });
+        document.addEventListener('click', reforzarPantallaEncendida);
+
+        /* =====================================================
+           PITIDOS DEL TEMPORIZADOR
+        ===================================================== */
+        function reproducirPitidoInicio() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(660, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {
+                console.error('Error audio inicio:', e);
+            }
+        }
+
+        function reproducirAlarmaFin() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                let tiempo = audioCtx.currentTime;
+                for (let i = 0; i < 3; i++) {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, tiempo);
+                    gain.gain.setValueAtTime(0.6, tiempo);
+                    gain.gain.exponentialRampToValueAtTime(0.01, tiempo + 0.3);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(tiempo);
+                    osc.stop(tiempo + 0.4);
+                    tiempo += 0.5;
+                }
+            } catch (e) {
+                console.error('Error audio fin:', e);
+            }
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+        }
+
+        function actualizarPantalla() {
+            const minutos = Math.floor(timeLeft / 60);
+            const segundos = timeLeft % 60;
+            timerDisplay.textContent = `${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+        }
+
+        function iniciarTemporizador(segundosTotales, modoTexto) {
+            clearInterval(countdownInterval);
+            reforzarPantallaEncendida();
+            reproducirPitidoInicio();
+
+            timeLeft = segundosTotales;
+            statusText.textContent = modoTexto;
+            statusText.classList.remove('text-zinc-400', 'text-red-500');
+            statusText.classList.add('text-[#1DB954]');
+            actualizarPantalla();
+
+            reanudarSpotify();
+
+            countdownInterval = setInterval(() => {
+                timeLeft--;
+                actualizarPantalla();
+
+                if (timeLeft <= 0) {
+                    clearInterval(countdownInterval);
+                    statusText.textContent = '¡Tiempo Terminado!';
+                    statusText.classList.remove('text-[#1DB954]');
+                    statusText.classList.add('text-red-500');
+                    reproducirAlarmaFin();
+                    pausarSpotify();
+                }
+            }, 1000);
+        }
+
+        btn30s.addEventListener('click', () => iniciarTemporizador(30, 'Descanso Corto (Entre Series)'));
+        btn3m.addEventListener('click', () => iniciarTemporizador(180, 'Descanso Largo'));
+
+        /* =====================================================
+           SPOTIFY — CONTROL REMOTO VÍA WEB API (OAuth PKCE)
+           Esta app NO reproduce audio: solo llama a los endpoints
+           /me/player/play, /pause, /next, /previous, que la Web
+           API de Spotify reenvía al dispositivo activo (tu
+           Spotify abierto en el celular).
+        ===================================================== */
+        const LS_CLIENT_ID = 'spotify_client_id';
+        const LS_VERIFIER = 'spotify_code_verifier';
+        const LS_ACCESS_TOKEN = 'spotify_access_token';
+        const LS_REFRESH_TOKEN = 'spotify_refresh_token';
+        const LS_EXPIRES_AT = 'spotify_expires_at';
+
+        let accessToken = localStorage.getItem(LS_ACCESS_TOKEN) || null;
+        let refreshToken = localStorage.getItem(LS_REFRESH_TOKEN) || null;
+        let pollInterval = null;
+
+        function getClientId() {
+            return localStorage.getItem(LS_CLIENT_ID) || '';
+        }
+
+        inputClientId.value = getClientId();
+
+        function setEstadoSpotify(dotClass, texto) {
+            spotifyStatusDot.className = `w-2 h-2 rounded-full ${dotClass}`;
+            spotifyStatusText.textContent = texto;
+        }
+
+        function habilitarControles(habilitar) {
+            [btnPlayPause, btnPrev, btnNext].forEach(btn => {
+                btn.classList.toggle('control-disabled', !habilitar);
+            });
+        }
+
+        spotifyStatusBtn.addEventListener('click', () => {
+            spotifyPanel.classList.toggle('abierto');
+        });
+
+        btnCopyRedirect.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(REDIRECT_URI);
+                btnCopyRedirect.textContent = '¡Copiado!';
+                setTimeout(() => { btnCopyRedirect.textContent = 'Copiar'; }, 1500);
+            } catch (e) {
+                console.log('No se pudo copiar:', e.message);
+            }
+        });
+
+        btnGuardarClientId.addEventListener('click', () => {
+            const val = inputClientId.value.trim();
+            if (!val) return;
+            localStorage.setItem(LS_CLIENT_ID, val);
+            configHelp.textContent = 'Client ID guardado. Ahora toca "Conectar con Spotify".';
+        });
+
+        /* ---------- PKCE helpers ---------- */
+        function generarCadenaAleatoria(longitud) {
+            const posibles = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            const valores = crypto.getRandomValues(new Uint8Array(longitud));
+            return Array.from(valores).map(v => posibles[v % posibles.length]).join('');
+        }
+
+        async function sha256(plano) {
+            const encoder = new TextEncoder();
+            const datos = encoder.encode(plano);
+            return crypto.subtle.digest('SHA-256', datos);
+        }
+
+        function base64UrlEncode(buffer) {
+            let str = '';
+            const bytes = new Uint8Array(buffer);
+            for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        async function iniciarConexionSpotify() {
+            const clientId = getClientId();
+            if (!clientId) {
+                configHelp.textContent = 'Primero pega y guarda tu Client ID arriba.';
+                spotifyPanel.classList.add('abierto');
+                return;
+            }
+            const verifier = generarCadenaAleatoria(64);
+            localStorage.setItem(LS_VERIFIER, verifier);
+            const hashed = await sha256(verifier);
+            const challenge = base64UrlEncode(hashed);
+
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: clientId,
+                scope: SCOPES,
+                code_challenge_method: 'S256',
+                code_challenge: challenge,
+                redirect_uri: REDIRECT_URI
+            });
+
+            window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+        }
+
+        btnConectarSpotify.addEventListener('click', iniciarConexionSpotify);
+
+        btnDesconectar.addEventListener('click', () => {
+            localStorage.removeItem(LS_ACCESS_TOKEN);
+            localStorage.removeItem(LS_REFRESH_TOKEN);
+            localStorage.removeItem(LS_EXPIRES_AT);
+            accessToken = null;
+            refreshToken = null;
+            clearInterval(pollInterval);
+            habilitarControles(false);
+            btnDesconectar.classList.add('hidden');
+            setEstadoSpotify('bg-yellow-500 animate-pulse', 'CONTROL REMOTO DESCONECTADO');
+            trackTitle.textContent = 'Conecta tu Spotify arriba';
+            trackArtist.textContent = 'Sin dispositivo activo';
+            deviceName.textContent = 'Sin dispositivo';
+        });
+
+        async function intercambiarCodigoPorToken(code) {
+            const clientId = getClientId();
+            const verifier = localStorage.getItem(LS_VERIFIER);
+            const body = new URLSearchParams({
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: REDIRECT_URI,
+                client_id: clientId,
+                code_verifier: verifier
+            });
+
+            const res = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                console.error('Error al obtener token:', err);
+                setEstadoSpotify('bg-red-500', 'ERROR AL CONECTAR (revisa Client ID / Redirect URI)');
+                return;
+            }
+
+            const data = await res.json();
+            guardarTokens(data);
+        }
+
+        function guardarTokens(data) {
+            accessToken = data.access_token;
+            if (data.refresh_token) refreshToken = data.refresh_token;
+            const expiresAt = Date.now() + (data.expires_in * 1000);
+            localStorage.setItem(LS_ACCESS_TOKEN, accessToken);
+            if (refreshToken) localStorage.setItem(LS_REFRESH_TOKEN, refreshToken);
+            localStorage.setItem(LS_EXPIRES_AT, String(expiresAt));
+            despuesDeConectar();
+        }
+
+        async function refrescarToken() {
+            const clientId = getClientId();
+            if (!refreshToken || !clientId) return false;
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId
+            });
+            const res = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            guardarTokens(data);
+            return true;
+        }
+
+        async function tokenValido() {
+            const expiresAt = Number(localStorage.getItem(LS_EXPIRES_AT) || 0);
+            if (accessToken && Date.now() < expiresAt - 5000) return true;
+            return await refrescarToken();
+        }
+
+        /* ---------- Llamadas a la Web API (control remoto real) ---------- */
+        async function llamarSpotifyAPI(endpoint, method) {
+            const ok = await tokenValido();
+            if (!ok) {
+                setEstadoSpotify('bg-red-500', 'SESIÓN EXPIRADA — VUELVE A CONECTAR');
+                return null;
+            }
+            const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+                method,
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (res.status === 401) {
+                const refrescado = await refrescarToken();
+                if (refrescado) return llamarSpotifyAPI(endpoint, method);
+                return null;
+            }
+            if (res.status === 204 || res.status === 202) return {};
+            if (res.status === 404) {
+                setEstadoSpotify('bg-yellow-500', 'ABRE SPOTIFY EN TU CELULAR Y DALE PLAY');
+                return null;
+            }
+            if (!res.ok) {
+                console.error('Error Spotify API:', res.status, await res.text());
+                return null;
+            }
+            try { return await res.json(); } catch { return {}; }
+        }
+
+        function reanudarSpotify() {
+            llamarSpotifyAPI('/me/player/play', 'PUT');
+        }
+
+        function pausarSpotify() {
+            llamarSpotifyAPI('/me/player/pause', 'PUT');
+        }
+
+        btnPlayPause.addEventListener('click', async () => {
+            const estado = await llamarSpotifyAPI('/me/player', 'GET');
+            if (estado && estado.is_playing) {
+                await llamarSpotifyAPI('/me/player/pause', 'PUT');
+            } else {
+                await llamarSpotifyAPI('/me/player/play', 'PUT');
+            }
+            actualizarEstadoReproduccion();
+        });
+
+        btnNext.addEventListener('click', async () => {
+            await llamarSpotifyAPI('/me/player/next', 'POST');
+            setTimeout(actualizarEstadoReproduccion, 800);
+        });
+
+        btnPrev.addEventListener('click', async () => {
+            await llamarSpotifyAPI('/me/player/previous', 'POST');
+            setTimeout(actualizarEstadoReproduccion, 800);
+        });
+
+        async function actualizarEstadoReproduccion() {
+            const estado = await llamarSpotifyAPI('/me/player', 'GET');
+            if (!estado || !estado.item) {
+                trackTitle.textContent = 'Nada sonando ahora';
+                trackArtist.textContent = 'Dale play en tu celular';
+                deviceName.textContent = 'Sin dispositivo';
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+                return;
+            }
+
+            trackTitle.textContent = estado.item.name || 'Reproduciendo';
+            trackArtist.textContent = (estado.item.artists || []).map(a => a.name).join(', ') || 'Spotify';
+            deviceName.textContent = estado.device ? estado.device.name : 'Sin dispositivo';
+
+            playIcon.classList.toggle('hidden', estado.is_playing);
+            pauseIcon.classList.toggle('hidden', !estado.is_playing);
+
+            setEstadoSpotify('bg-green-500 animate-pulse', 'CONTROL REMOTO CONECTADO');
+            habilitarControles(true);
+            btnDesconectar.classList.remove('hidden');
+        }
+
+        function despuesDeConectar() {
+            // Limpia el ?code= de la URL sin recargar la página
+            const url = new URL(window.location.href);
+            url.searchParams.delete('code');
+            url.searchParams.delete('state');
+            window.history.replaceState({}, document.title, url.toString());
+
+            setEstadoSpotify('bg-green-500 animate-pulse', 'CONTROL REMOTO CONECTADO');
+            spotifyPanel.classList.remove('abierto');
+            habilitarControles(true);
+            btnDesconectar.classList.remove('hidden');
+            actualizarEstadoReproduccion();
+
+            clearInterval(pollInterval);
+            pollInterval = setInterval(actualizarEstadoReproduccion, 5000);
+        }
+
+        /* ---------- Arranque ---------- */
+        (async function iniciar() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                setEstadoSpotify('bg-yellow-500 animate-pulse', 'CONECTANDO...');
+                await intercambiarCodigoPorToken(code);
+                return;
+            }
+
+            const ok = await tokenValido();
+            if (ok) {
+                despuesDeConectar();
+            } else {
+                spotifyPanel.classList.add('abierto');
+            }
+        })();
+    </script>
+</body>
+</html>
